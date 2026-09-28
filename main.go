@@ -2,10 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -185,6 +187,10 @@ func main() {
 		}
 	}
 	fallback := os.Getenv("MEMBER_TOKEN")
+	tokenKey, err := hex.DecodeString(os.Getenv("TOKEN_KEY"))
+	if err != nil || len(tokenKey) != 32 {
+		log.Fatal("TOKEN_KEY must be 32-byte hex")
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /", HandleBoard(db, tmpl, members))
@@ -192,10 +198,22 @@ func main() {
 	mux.Handle("POST /tasks", RequireMember(members, fallback, HandleCreateTask(db)))
 	mux.Handle("POST /tasks/{id}/progress", RequireMember(members, fallback, HandleTaskProgress(db)))
 	mux.Handle("POST /tasks/{id}", RequireMember(members, fallback, HandleUpdateTask(db)))
+	loginURL := "https://login.microsoftonline.com/" + getenv("TENANT_ID", "common") +
+		"/oauth2/v2.0/authorize?client_id=" + os.Getenv("CLIENT_ID") +
+		"&response_type=code&redirect_uri=" + url.QueryEscape(getenv("REDIRECT_URL", "")) +
+		"&scope=" + url.QueryEscape("openid profile email offline_access User.Read Mail.Read ChannelMessage.Read.All Team.ReadBasic.All")
+	mux.Handle("GET /login", HandleLogin(loginURL))
+	mux.Handle("GET /auth/callback", HandleCallback(db, tokenKey, members, oauthExchanger{config: oauthConfigFromEnv()}))
+	mux.Handle("POST /disconnect", RequireMember(members, fallback, HandleDisconnect(db, tokenKey)))
+	mux.Handle("GET /logout", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}))
 
 	addr := ":" + getenv("PORT", "8080")
 	log.Printf("listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	withUser := WithUser(tokenKey, mux)
+	log.Fatal(http.ListenAndServe(addr, withUser))
 }
 
 // HandleTaskProgress moves status + % with validation (blocked needs note).

@@ -174,6 +174,11 @@ func SetUserToken(db *sql.DB, email string, sealed []byte) error {
 	return err
 }
 
+func ClearUserToken(db *sql.DB, email string) error {
+	_, err := db.Exec(`UPDATE users SET refresh_token_enc=NULL, connected=0, updated_at=CURRENT_TIMESTAMP WHERE email=?`, email)
+	return err
+}
+
 var recurrenceSteps = map[string]time.Duration{
 	"daily":   24 * time.Hour,
 	"weekly":  7 * 24 * time.Hour,

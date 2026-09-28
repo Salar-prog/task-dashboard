@@ -136,6 +136,26 @@ type TokenExchanger interface {
 	Exchange(code string) (email, refresh string, err error)
 }
 
+func HandleLogin(authURL string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, authURL, http.StatusFound)
+	})
+}
+
+func HandleDisconnect(db *sql.DB, key []byte) http.Handler {
+	_ = key
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("X-User")
+		if email == "" {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		_ = ClearUserToken(db, email)
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}
+
 func HandleCallback(db *sql.DB, key []byte, members map[string]bool, ex TokenExchanger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		email, refresh, err := ex.Exchange(r.URL.Query().Get("code"))
