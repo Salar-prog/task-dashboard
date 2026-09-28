@@ -63,6 +63,11 @@ func Migrate(db *sql.DB) error {
 			actor TEXT NOT NULL, from_status TEXT NOT NULL, to_status TEXT NOT NULL,
 			note TEXT NOT NULL DEFAULT '', at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS import_errors(
+			id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
+			ref TEXT NOT NULL DEFAULT '', err TEXT NOT NULL,
+			at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -356,4 +361,9 @@ func cloneNext(tx *sql.Tx, id int64, actor string, next time.Time) (int64, error
 		return 0, err
 	}
 	return cloneID, nil
+}
+
+func LogImportError(db *sql.DB, source, ref string, ierr error) error {
+	_, err := db.Exec(`INSERT INTO import_errors(source, ref, err) VALUES(?,?,?)`, source, ref, ierr.Error())
+	return err
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -116,5 +117,19 @@ func TestTeamsPollImportsMentions(t *testing.T) {
 	}
 	if owner != "boss@example.com" {
 		t.Fatalf("non-member mention falls back to sender, got %q", owner)
+	}
+}
+
+func TestLogImportError(t *testing.T) {
+	db := openTestDB(t)
+	if err := LogImportError(db, "outlook", "mail-9", errors.New("boom")); err != nil {
+		t.Fatalf("log: %v", err)
+	}
+	var source, ref, msg string
+	if err := db.QueryRow(`SELECT source, ref, err FROM import_errors`).Scan(&source, &ref, &msg); err != nil {
+		t.Fatalf("row: %v", err)
+	}
+	if source != "outlook" || ref != "mail-9" || msg != "boom" {
+		t.Fatalf("wrong row %q %q %q", source, ref, msg)
 	}
 }
