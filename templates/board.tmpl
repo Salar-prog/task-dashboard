@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Task board</title></head>
+<body>
+<h1>Task board</h1>
+<nav>
+  <a href="/">All</a>
+  <a href="/?status=todo">Todo</a>
+  <a href="/?status=in_progress">In progress</a>
+  <a href="/?status=blocked">Blocked</a>
+  <a href="/?status=done">Done</a>
+  <a href="/?priority=urgent">Urgent</a>
+  <a href="/?priority=high">High</a>
+</nav>
+{{range .Groups}}
+<h2>{{.Name}}</h2>
+<table>
+<tr><th>Title</th><th>Priority</th><th>Assigner</th><th>Status</th><th>%</th><th>Related to</th><th>Routine</th></tr>
+{{range .Tasks}}
+<tr>
+<td>{{.Title}}</td>
+<td>{{.Priority}}</td>
+<td>{{.Assigner}}</td>
+<td>{{.Status}}</td>
+<td>{{.Progress}}</td>
+<td>{{.RelatedTo}}</td>
+<td>{{.RoutineLabel}} {{.Recurrence}}</td>
+</tr>
+{{if $.CanEdit}}
+<tr><td colspan="7">
+<form method="post" action="/tasks/{{.ID}}/progress">
+<input type="hidden" name="status" value="in_progress">
+<input type="number" name="progress" min="0" max="100" value="{{.Progress}}">
+<input type="text" name="note" placeholder="note (required if blocked)">
+<button type="submit">Update</button>
+</form>
+</td></tr>
+{{end}}
+{{end}}
+</table>
+{{end}}
+{{if .CanEdit}}
+<h2>New task</h2>
+<form method="post" action="/tasks">
+<input type="text" name="title" placeholder="title" required>
+<input type="text" name="owner" placeholder="owner email">
+<input type="text" name="priority" placeholder="low|medium|high|urgent">
+<button type="submit">Add</button>
+</form>
+{{end}}
+</body>
+</html>
