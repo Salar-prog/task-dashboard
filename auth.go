@@ -112,3 +112,21 @@ func VerifySession(key []byte, cookie string) (string, error) {
 	}
 	return parts[0], nil
 }
+
+func RoleFor(email string, members map[string]bool) string {
+	if members[email] {
+		return "member"
+	}
+	return "senior"
+}
+
+func WithUser(key []byte, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := ""
+		if c, err := r.Cookie("session"); err == nil {
+			email, _ = VerifySession(key, c.Value)
+		}
+		r.Header.Set("X-User", email)
+		next.ServeHTTP(w, r)
+	})
+}

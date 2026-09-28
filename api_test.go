@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 var testMembers = map[string]bool{"member1@example.com": true}
@@ -112,5 +113,39 @@ func TestProgressEndpoint(t *testing.T) {
 	}, "member1@example.com")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("blocked w/o note: want 400, got %d", rec.Code)
+	}
+}
+
+func TestWithUserSetsHeader(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	var got string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Get("X-User") })
+	h := WithUser(key, next)
+
+	c, _ := SignSession(key, "member1@example.com", time.Now().Add(time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: c})
+	httptest.NewRecorder()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got != "member1@example.com" {
+		t.Fatalf("want X-User set, got %q", got)
+	}
+
+	bad := httptest.NewRequest(http.MethodGet, "/", nil)
+	got = "x"
+	h.ServeHTTP(httptest.NewRecorder(), bad)
+	if got != "" {
+		t.Fatalf("invalid session must clear X-User, got %q", got)
+	}
+}
+
+func TestRoleFor(t *testing.T) {
+	m := map[string]bool{"member1@example.com": true}
+	if RoleFor("member1@example.com", m) != "member" {
+		t.Fatalf("member misclassified")
+	}
+	if RoleFor("senior@example.com", m) != "senior" {
+		t.Fatalf("senior misclassified")
 	}
 }
