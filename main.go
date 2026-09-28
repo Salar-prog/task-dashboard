@@ -205,6 +205,7 @@ func main() {
 	mux.Handle("GET /login", HandleLogin(loginURL))
 	mux.Handle("GET /auth/callback", HandleCallback(db, tokenKey, members, oauthExchanger{config: oauthConfigFromEnv()}))
 	mux.Handle("POST /disconnect", RequireMember(members, fallback, HandleDisconnect(db, tokenKey)))
+	mux.Handle("GET /connect", RequireMember(members, fallback, HandleConnect(db, tokenKey, oauthRefresher{config: oauthConfigFromEnv()}, &GraphClient{}, getenv("WATCH_FOLDER_NAME", "Task Intake"))))
 	mux.Handle("GET /logout", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
 		http.Redirect(w, r, "/", http.StatusSeeOther)

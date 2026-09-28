@@ -186,3 +186,33 @@ func HandleCallback(db *sql.DB, key []byte, members map[string]bool, ex TokenExc
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }
+
+func HandleConnect(db *sql.DB, key []byte, ref Refresher, g *GraphClient, folderName string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("X-User")
+		if email == "" {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		access, err := EnsureAccessToken(db, key, ref, email)
+		if err != nil {
+			http.Error(w, "re-login to connect outlook", http.StatusBadRequest)
+			return
+		}
+		folderID, err := g.ResolveFolderID(access, folderName)
+		if err != nil {
+			http.Error(w, "folder "+folderName+" not found", http.StatusBadRequest)
+			return
+		}
+		u, err := GetUser(db, email)
+		if err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		if err := SetUserConnected(db, email, u.RefreshTokenEnc, folderID); err != nil {
+			http.Error(w, "connect failed", http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}

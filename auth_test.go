@@ -100,3 +100,45 @@ func TestDisconnectClearsToken(t *testing.T) {
 		t.Fatalf("token not wiped: %+v", u)
 	}
 }
+
+func TestConnectResolvesFolder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"value":[{"id":"fld-9"}]}`))
+	}))
+	defer srv.Close()
+
+	db := openTestDB(t)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	if err := UpsertUser(db, User{Email: "member1@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	sealed, _ := SealToken(key, []byte("refresh-xyz"))
+	if err := SetUserToken(db, "member1@example.com", sealed); err != nil {
+		t.Fatal(err)
+	}
+	g := &GraphClient{BaseURL: srv.URL, HTTP: srv.Client()}
+	h := HandleConnect(db, key, fakeRefresher{access: "a"}, g, "Task Intake")
+
+	req := httptest.NewRequest(http.MethodGet, "/connect", nil)
+	req.Header.Set("X-User", "member1@example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d", rec.Code)
+	}
+	u, _ := GetUser(db, "member1@example.com")
+	if !u.Connected || u.OutlookFolderID != "fld-9" {
+		t.Fatalf("not connected: %+v", u)
+	}
+
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"value":[]}`))
+	}))
+	defer empty.Close()
+	h2 := HandleConnect(db, key, fakeRefresher{access: "a"}, &GraphClient{BaseURL: empty.URL, HTTP: empty.Client()}, "Task Intake")
+	rec = httptest.NewRecorder()
+	h2.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing folder: want 400, got %d", rec.Code)
+	}
+}
