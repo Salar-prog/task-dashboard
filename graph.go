@@ -119,3 +119,72 @@ func (g *GraphClient) ListUnreadMail(accessToken, folderID string) ([]MailMessag
 	}
 	return out, nil
 }
+
+type graphChatMsg struct {
+	ID   string `json:"id"`
+	Body struct {
+		Content string `json:"content"`
+	} `json:"body"`
+	From struct {
+		User struct {
+			DisplayName string `json:"displayName"`
+		} `json:"user"`
+	} `json:"from"`
+	Mentions []struct {
+		Mentioned struct {
+			User struct {
+				UserPrincipalName string `json:"userPrincipalName"`
+				Mail              string `json:"mail"`
+				DisplayName       string `json:"displayName"`
+			} `json:"user"`
+		} `json:"mentioned"`
+	} `json:"mentions"`
+}
+
+func stripTags(s string) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		default:
+			if !inTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (g *GraphClient) ListChannelMessages(accessToken, teamID, channelID string) ([]TeamsMessage, error) {
+	var v struct {
+		Value []graphChatMsg `json:"value"`
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/channels/" + url.PathEscape(channelID) +
+		"/messages?$top=25&$orderby=createdDateTime%20desc"
+	if err := g.doGet(accessToken, path, &v); err != nil {
+		return nil, err
+	}
+	out := make([]TeamsMessage, 0, len(v.Value))
+	for _, m := range v.Value {
+		tm := TeamsMessage{ID: m.ID, Text: stripTags(m.Body.Content), From: m.From.User.DisplayName}
+		for _, mt := range m.Mentions {
+			u := mt.Mentioned.User
+			email := u.UserPrincipalName
+			if email == "" {
+				email = u.Mail
+			}
+			if email == "" {
+				email = u.DisplayName
+			}
+			if email != "" {
+				tm.Mentioned = append(tm.Mentioned, email)
+			}
+		}
+		out = append(out, tm)
+	}
+	return out, nil
+}
