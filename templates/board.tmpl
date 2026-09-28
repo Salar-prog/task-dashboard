@@ -27,6 +27,7 @@
 <td>{{.RelatedTo}}</td>
 <td>{{.RoutineLabel}} {{.Recurrence}}</td>
 </tr>
+<tr><td colspan="7">{{range index $.Events .ID}}{{.Note}} {{end}}</td></tr>
 {{if $.CanEdit}}
 <tr><td colspan="7">
 <form method="post" action="/tasks/{{.ID}}/progress">

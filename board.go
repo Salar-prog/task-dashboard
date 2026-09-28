@@ -15,6 +15,7 @@ type OwnerGroup struct {
 
 type BoardData struct {
 	Groups            []OwnerGroup
+	Events            map[int64][]Event
 	CanEdit           bool
 	Owner, Status     string
 	Priority, Q       string
@@ -44,11 +45,20 @@ func HandleBoard(db *sql.DB, tmpl *template.Template, members map[string]bool) h
 		}
 		data := BoardData{
 			Groups:   groups,
+			Events:   map[int64][]Event{},
 			CanEdit:  members[r.Header.Get("X-User")],
 			Owner:    q.Get("owner"),
 			Status:   q.Get("status"),
 			Priority: q.Get("priority"),
 			Q:        q.Get("q"),
+		}
+		for _, t := range tasks {
+			evs, err := ListEvents(db, t.ID, 5)
+			if err != nil {
+				http.Error(w, "board failed", http.StatusInternalServerError)
+				return
+			}
+			data.Events[t.ID] = evs
 		}
 		if users, err := ListUsers(db); err == nil {
 			var missing []string

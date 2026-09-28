@@ -96,6 +96,23 @@ func TestBoardSeniorNoForms(t *testing.T) {
 	}
 }
 
+func TestBoardShowsHistory(t *testing.T) {
+	db := openTestDB(t)
+	id, err := CreateTask(db, Task{Title: "T", Owner: "m1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateProgress(db, id, "in_progress", 10, "started", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	boardHandler(t, db).ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "started") {
+		t.Fatalf("board must show history note, got:\n%s", rec.Body.String())
+	}
+}
+
 func TestBoardShowsUnconnectedNotice(t *testing.T) {
 	db := openTestDB(t)
 	if _, err := CreateTask(db, Task{Title: "T", Owner: "member1@example.com"}); err != nil {

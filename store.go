@@ -368,6 +368,27 @@ func LogImportError(db *sql.DB, source, ref string, ierr error) error {
 	return err
 }
 
+type Event struct {
+	Actor, From, To, Note string
+}
+
+func ListEvents(db *sql.DB, taskID int64, limit int) ([]Event, error) {
+	rows, err := db.Query(`SELECT actor, from_status, to_status, note FROM task_events WHERE task_id=? ORDER BY id DESC LIMIT ?`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.Actor, &e.From, &e.To, &e.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func ListUsers(db *sql.DB) ([]User, error) {
 	rows, err := db.Query(`SELECT email, display_name, role, COALESCE(refresh_token_enc,''), COALESCE(outlook_folder_id,''), connected FROM users ORDER BY email`)
 	if err != nil {
