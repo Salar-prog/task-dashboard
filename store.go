@@ -367,3 +367,22 @@ func LogImportError(db *sql.DB, source, ref string, ierr error) error {
 	_, err := db.Exec(`INSERT INTO import_errors(source, ref, err) VALUES(?,?,?)`, source, ref, ierr.Error())
 	return err
 }
+
+func ListUsers(db *sql.DB) ([]User, error) {
+	rows, err := db.Query(`SELECT email, display_name, role, COALESCE(refresh_token_enc,''), COALESCE(outlook_folder_id,''), connected FROM users ORDER BY email`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		var connected int
+		if err := rows.Scan(&u.Email, &u.DisplayName, &u.Role, &u.RefreshTokenEnc, &u.OutlookFolderID, &connected); err != nil {
+			return nil, err
+		}
+		u.Connected = connected == 1
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

@@ -133,3 +133,31 @@ func TestLogImportError(t *testing.T) {
 		t.Fatalf("wrong row %q %q %q", source, ref, msg)
 	}
 }
+
+func TestRunPollCycle(t *testing.T) {
+	db := openTestDB(t)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	if err := UpsertUser(db, User{Email: "member1@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	sealed, _ := SealToken(key, []byte("refresh-xyz"))
+	if err := SetUserConnected(db, "member1@example.com", sealed, "folder-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertUser(db, User{Email: "member2@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+
+	outlook := &fakeOutlook{mails: []MailMessage{{ID: "om1", Subject: "S", From: "b@x.com"}}}
+	teams := &fakeTeams{msgs: []TeamsMessage{{ID: "tm1", Text: "Hi", From: "b@x.com", Mentioned: []string{"member1@example.com"}}}}
+	mkOutlook := func(token string) OutlookSource { return outlook }
+	mkTeams := func(token string) (TeamsSource, string, string) { return teams, "t1", "c1" }
+
+	on, tn, err := RunPollCycle(db, key, fakeRefresher{access: "a"}, mkOutlook, mkTeams)
+	if err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
+	if on != 1 || tn != 1 {
+		t.Fatalf("want 1+1, got %d+%d", on, tn)
+	}
+}

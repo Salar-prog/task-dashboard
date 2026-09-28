@@ -96,3 +96,44 @@ func PollTeams(db *sql.DB, src TeamsSource, teamID, channelID string, members ma
 	}
 	return imported, nil
 }
+
+func RunPollCycle(db *sql.DB, key []byte, r Refresher, mkOutlook func(string) OutlookSource, mkTeams func(string) (TeamsSource, string, string)) (outlookN, teamsN int, err error) {
+	users, err := ListUsers(db)
+	if err != nil {
+		return 0, 0, err
+	}
+	members := map[string]bool{}
+	var firstToken string
+	for _, u := range users {
+		if u.Role == "member" {
+			members[u.Email] = true
+		}
+		if !u.Connected || len(u.RefreshTokenEnc) == 0 {
+			continue
+		}
+		access, err := EnsureAccessToken(db, key, r, u.Email)
+		if err != nil {
+			_ = LogImportError(db, "outlook", u.Email, err)
+			continue
+		}
+		if firstToken == "" {
+			firstToken = access
+		}
+		n, err := PollOutlookForUser(db, mkOutlook(access), u.Email)
+		if err != nil {
+			_ = LogImportError(db, "outlook", u.Email, err)
+			continue
+		}
+		outlookN += n
+	}
+	if firstToken == "" {
+		return outlookN, 0, nil
+	}
+	src, teamID, channelID := mkTeams(firstToken)
+	n, err := PollTeams(db, src, teamID, channelID, members)
+	if err != nil {
+		_ = LogImportError(db, "teams", teamID+"/"+channelID, err)
+		return outlookN, 0, err
+	}
+	return outlookN, n, nil
+}
