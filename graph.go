@@ -281,3 +281,15 @@ type graphTeams struct {
 func (t graphTeams) ListRecent(teamID, channelID string) ([]TeamsMessage, error) {
 	return t.g.ListChannelMessages(t.token, teamID, channelID)
 }
+
+type oauthRefresher struct {
+	config *oauth2.Config
+}
+
+func (o oauthRefresher) Refresh(refresh string) (string, time.Time, error) {
+	tok, err := o.config.TokenSource(context.Background(), &oauth2.Token{RefreshToken: refresh}).Token()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return tok.AccessToken, tok.Expiry, nil
+}
