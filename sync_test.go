@@ -9,6 +9,7 @@ type fakeOutlook struct {
 	folderSeen string
 	mails      []MailMessage
 	err        error
+	marked     []string
 }
 
 func (f *fakeOutlook) ListUnread(folderID string) ([]MailMessage, error) {
@@ -17,6 +18,11 @@ func (f *fakeOutlook) ListUnread(folderID string) ([]MailMessage, error) {
 		return nil, f.err
 	}
 	return f.mails, nil
+}
+
+func (f *fakeOutlook) MarkRead(folderID, messageID string) error {
+	f.marked = append(f.marked, messageID)
+	return nil
 }
 
 // Connected member: unread mails become tasks (assigner=sender, owner=mailbox),
@@ -70,6 +76,34 @@ func TestOutlookPollImportsUnread(t *testing.T) {
 	}
 	if _, err := PollOutlookForUser(db, src, "ghost@example.com"); err == nil {
 		t.Fatalf("unknown user must error")
+	}
+}
+
+// Mark-read: PollOutlookForUser calls MarkRead once per INSERTED mail only —
+// duplicates (same internetMessageId) must not be marked again.
+func TestOutlookPollMarksReadOnInsertOnly(t *testing.T) {
+	db := openTestDB(t)
+	if err := UpsertUser(db, User{Email: "member1@example.com", DisplayName: "M", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetUserConnected(db, "member1@example.com", []byte("sealed"), "folder-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	src := &fakeOutlook{mails: []MailMessage{
+		{ID: "mail-1", Subject: "One", From: "boss@example.com"},
+		{ID: "mail-1", Subject: "One", From: "boss@example.com"},
+		{ID: "mail-2", Subject: "Two", From: "peer@example.com"},
+	}}
+	imported, err := PollOutlookForUser(db, src, "member1@example.com")
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if imported != 2 {
+		t.Fatalf("want 2 new tasks, got %d", imported)
+	}
+	if len(src.marked) != 2 || src.marked[0] != "mail-1" || src.marked[1] != "mail-2" {
+		t.Fatalf("want MarkRead once per inserted mail [mail-1 mail-2], got %v", src.marked)
 	}
 }
 

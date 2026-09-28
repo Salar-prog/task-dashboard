@@ -19,6 +19,13 @@ type OutlookSource interface {
 	ListUnread(folderID string) ([]MailMessage, error)
 }
 
+// readMarker is optionally implemented by OutlookSource backends that can
+// mark a message read after import. Checked by assertion so the core poll
+// path stays backend-agnostic.
+type readMarker interface {
+	MarkRead(folderID, messageID string) error
+}
+
 // PollOutlookForUser imports one connected member's unread intake mail.
 // Unconnected members return (0, nil); unknown emails error loudly.
 func PollOutlookForUser(db *sql.DB, src OutlookSource, userEmail string) (int, error) {
@@ -45,6 +52,9 @@ func PollOutlookForUser(db *sql.DB, src OutlookSource, userEmail string) (int, e
 		}
 		if inserted {
 			imported++
+			if rm, ok := src.(readMarker); ok {
+				_ = rm.MarkRead(u.OutlookFolderID, m.ID)
+			}
 		}
 	}
 	return imported, nil

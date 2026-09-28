@@ -122,6 +122,31 @@ func (g *GraphClient) ListUnreadMail(accessToken, folderID string) ([]MailMessag
 	return out, nil
 }
 
+func (g *GraphClient) MarkRead(accessToken, folderID, messageID string) error {
+	httpClient := g.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	body := strings.NewReader(`{"isRead":true}`)
+	req, err := http.NewRequest(http.MethodPatch,
+		graphBase(g)+"/me/mailFolders/"+url.PathEscape(folderID)+"/messages/"+url.PathEscape(messageID), body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("graph mark read %s: %d %s", messageID, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
 type graphChatMsg struct {
 	ID   string `json:"id"`
 	Body struct {
@@ -271,6 +296,10 @@ type graphOutlook struct {
 
 func (o graphOutlook) ListUnread(folderID string) ([]MailMessage, error) {
 	return o.g.ListUnreadMail(o.token, folderID)
+}
+
+func (o graphOutlook) MarkRead(folderID, messageID string) error {
+	return o.g.MarkRead(o.token, folderID, messageID)
 }
 
 type graphTeams struct {
