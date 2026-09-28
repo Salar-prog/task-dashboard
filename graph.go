@@ -263,3 +263,21 @@ func EnsureAccessToken(db *sql.DB, key []byte, r Refresher, email string) (strin
 	}
 	return access, nil
 }
+
+type graphOutlook struct {
+	g     *GraphClient
+	token string
+}
+
+func (o graphOutlook) ListUnread(folderID string) ([]MailMessage, error) {
+	return o.g.ListUnreadMail(o.token, folderID)
+}
+
+type graphTeams struct {
+	g               *GraphClient
+	token, team, ch string
+}
+
+func (t graphTeams) ListRecent(teamID, channelID string) ([]TeamsMessage, error) {
+	return t.g.ListChannelMessages(t.token, teamID, channelID)
+}

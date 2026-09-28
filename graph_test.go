@@ -103,3 +103,42 @@ func TestEnsureAccessTokenRefreshes(t *testing.T) {
 		t.Fatalf("unknown user must error")
 	}
 }
+
+func TestAdaptersDrivePollCores(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "mailFolders/f1/messages"):
+			w.Write([]byte(`{"value":[{"internetMessageId":"am1","subject":"Sign this","from":{"emailAddress":{"address":"boss@example.com"}}}]}`))
+		case strings.Contains(r.URL.Path, "channels/c1/messages"):
+			w.Write([]byte(`{"value":[{"id":"tm1","body":{"content":"Do the thing"},"from":{"user":{"displayName":"Boss"}},"mentions":[{"mentioned":{"user":{"userPrincipalName":"member1@example.com"}}}]}]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	db := openTestDB(t)
+	if err := UpsertUser(db, User{Email: "member1@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetUserConnected(db, "member1@example.com", []byte("sealed"), "f1"); err != nil {
+		t.Fatal(err)
+	}
+	g := &GraphClient{BaseURL: srv.URL, HTTP: srv.Client()}
+
+	on, err := PollOutlookForUser(db, graphOutlook{g: g, token: "tok"}, "member1@example.com")
+	if err != nil || on != 1 {
+		t.Fatalf("outlook via adapter: got %d, %v", on, err)
+	}
+	tn, err := PollTeams(db, graphTeams{g: g, token: "tok"}, "t1", "c1", map[string]bool{"member1@example.com": true})
+	if err != nil || tn != 1 {
+		t.Fatalf("teams via adapter: got %d, %v", tn, err)
+	}
+	var owner string
+	if err := db.QueryRow(`SELECT owner FROM tasks WHERE source_ref='tm1'`).Scan(&owner); err != nil {
+		t.Fatalf("teams row: %v", err)
+	}
+	if owner != "member1@example.com" {
+		t.Fatalf("adapter owner wrong: %q", owner)
+	}
+}
