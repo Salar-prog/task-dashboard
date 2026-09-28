@@ -176,7 +176,7 @@ func main() {
 	if err := Migrate(db); err != nil {
 		log.Fatal(err)
 	}
-	tmpl, err := template.ParseFiles(filepath.Join(getenv("TEMPLATES_DIR", "templates"), "board.tmpl"))
+	tmpl, err := template.New("board").Funcs(BoardFuncs()).ParseFiles(filepath.Join(getenv("TEMPLATES_DIR", "templates"), "board.tmpl"))
 	if err != nil {
 		log.Fatal(err)
 	}

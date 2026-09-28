@@ -7,11 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func boardHandler(t *testing.T, db *sql.DB) http.Handler {
 	t.Helper()
-	tmpl, err := template.ParseFiles("templates/board.tmpl")
+	tmpl, err := template.New("board").Funcs(BoardFuncs()).ParseFiles("templates/board.tmpl")
 	if err != nil {
 		t.Fatalf("parse template: %v", err)
 	}
@@ -140,5 +141,29 @@ func TestBoardShowsUnconnectedNotice(t *testing.T) {
 	}
 	if body := get(); strings.Contains(body, "Outlook not connected") {
 		t.Fatalf("connected member must clear notice, got:\n%s", body)
+	}
+}
+
+func TestBoardOverdueAndFields(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := CreateTask(db, Task{Title: "Overdue task", Owner: "m1", Status: "todo", Deadline: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateTask(db, Task{Title: "No deadline task", Owner: "m1", Status: "todo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-User", "member1@example.com")
+	rec := httptest.NewRecorder()
+	boardHandler(t, db).ServeHTTP(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, "overdue") {
+		t.Fatalf("board must highlight overdue task, got:\n%s", body)
+	}
+	for _, want := range []string{`name="routine"`, `name="recurrence"`, `name="related_to"`, `name="deadline"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("member board missing input %s", want)
+		}
 	}
 }

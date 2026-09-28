@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // OwnerGroup is one board section. BoardData drives templates/board.tmpl.
@@ -20,6 +21,22 @@ type BoardData struct {
 	Owner, Status     string
 	Priority, Q       string
 	UnconnectedNotice string
+}
+
+// BoardFuncs exposes template helpers: overdue flags past-deadline open
+// tasks (zero deadline never counts), isodate formats for date inputs.
+func BoardFuncs() template.FuncMap {
+	return template.FuncMap{
+		"overdue": func(d time.Time, status string) bool {
+			return !d.IsZero() && status != "done" && time.Now().After(d)
+		},
+		"isodate": func(d time.Time) string {
+			if d.IsZero() {
+				return ""
+			}
+			return d.Format("2006-01-02")
+		},
+	}
 }
 
 // HandleBoard renders the grouped board. members maps verified login email → editor.
@@ -72,7 +89,7 @@ func HandleBoard(db *sql.DB, tmpl *template.Template, members map[string]bool) h
 			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.Execute(w, data); err != nil {
+		if err := tmpl.ExecuteTemplate(w, "board.tmpl", data); err != nil {
 			http.Error(w, "render failed", http.StatusInternalServerError)
 		}
 	})

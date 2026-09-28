@@ -18,7 +18,7 @@
 <table>
 <tr><th>Title</th><th>Priority</th><th>Assigner</th><th>Status</th><th>%</th><th>Related to</th><th>Routine</th></tr>
 {{range .Tasks}}
-<tr>
+<tr{{if overdue .Deadline .Status}} class="overdue"{{end}}>
 <td>{{.Title}}</td>
 <td>{{.Priority}}</td>
 <td>{{.Assigner}}</td>
@@ -36,6 +36,13 @@
 <input type="text" name="note" placeholder="note (required if blocked)">
 <button type="submit">Update</button>
 </form>
+<form method="post" action="/tasks/{{.ID}}">
+<input type="text" name="routine" placeholder="routine" value="{{.RoutineLabel}}">
+<input type="text" name="recurrence" placeholder="none|daily|weekly|monthly" value="{{.Recurrence}}">
+<input type="text" name="related_to" placeholder="related to" value="{{.RelatedTo}}">
+<input type="text" name="deadline" placeholder="deadline (RFC3339)" value="{{.Deadline}}">
+<button type="submit">Edit</button>
+</form>
 </td></tr>
 {{end}}
 {{end}}
@@ -47,6 +54,10 @@
 <input type="text" name="title" placeholder="title" required>
 <input type="text" name="owner" placeholder="owner email">
 <input type="text" name="priority" placeholder="low|medium|high|urgent">
+<input type="text" name="routine" placeholder="routine">
+<input type="text" name="recurrence" placeholder="none|daily|weekly|monthly">
+<input type="text" name="related_to" placeholder="related to">
+<input type="text" name="deadline" placeholder="deadline (RFC3339)">
 <button type="submit">Add</button>
 </form>
 {{end}}
