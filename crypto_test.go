@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 // Refresh tokens rest encrypted; roundtrip must hold and the wrong key must fail.
@@ -29,5 +30,24 @@ func TestTokenSealRoundtrip(t *testing.T) {
 	}
 	if _, err := SealToken([]byte("short"), []byte("x")); err == nil {
 		t.Fatalf("short key must fail")
+	}
+}
+
+func TestSessionSignVerify(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	c, err := SignSession(key, "member1@example.com", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	email, err := VerifySession(key, c)
+	if err != nil || email != "member1@example.com" {
+		t.Fatalf("verify: %q %v", email, err)
+	}
+	if _, err := VerifySession(key, c+"tampered"); err == nil {
+		t.Fatalf("tampered cookie must fail")
+	}
+	expired, _ := SignSession(key, "m@example.com", time.Now().Add(-time.Minute))
+	if _, err := VerifySession(key, expired); err == nil {
+		t.Fatalf("expired cookie must fail")
 	}
 }

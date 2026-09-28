@@ -3,10 +3,17 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // RequireMember gates writes: GET passes for all (senior read-only view),
@@ -68,4 +75,40 @@ func OpenToken(key, sealed []byte) ([]byte, error) {
 		return nil, errors.New("sealed token too short")
 	}
 	return gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], nil)
+}
+
+func SignSession(key []byte, email string, exp time.Time) (string, error) {
+	if len(key) != 32 {
+		return "", errors.New("session key must be 32 bytes")
+	}
+	payload := email + "|" + strconv.FormatInt(exp.Unix(), 10)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(payload))
+	sig := mac.Sum(nil)
+	return base64.URLEncoding.EncodeToString([]byte(payload + "|" + hex.EncodeToString(sig))), nil
+}
+
+func VerifySession(key []byte, cookie string) (string, error) {
+	if len(key) != 32 {
+		return "", errors.New("session key must be 32 bytes")
+	}
+	raw, err := base64.URLEncoding.DecodeString(cookie)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(string(raw), "|")
+	if len(parts) != 3 {
+		return "", errors.New("bad session format")
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(parts[0] + "|" + parts[1]))
+	want := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(parts[2]), []byte(want)) {
+		return "", errors.New("bad session signature")
+	}
+	exp, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return "", errors.New("session expired")
+	}
+	return parts[0], nil
 }
