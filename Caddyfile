@@ -1,0 +1,3 @@
+tasks.example.local {
+	reverse_proxy localhost:8080
+}
