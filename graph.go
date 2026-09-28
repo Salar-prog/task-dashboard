@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 )
@@ -187,4 +189,77 @@ func (g *GraphClient) ListChannelMessages(accessToken, teamID, channelID string)
 		out = append(out, tm)
 	}
 	return out, nil
+}
+
+var ErrFolderNotFound = errors.New("outlook folder not found")
+
+func (g *GraphClient) ResolveFolderID(accessToken, name string) (string, error) {
+	var v struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	path := "/me/mailFolders?$filter=displayName%20eq%20'" + url.QueryEscape(name) + "'&$select=id"
+	if err := g.doGet(accessToken, path, &v); err != nil {
+		return "", err
+	}
+	if len(v.Value) == 0 {
+		return "", ErrFolderNotFound
+	}
+	return v.Value[0].ID, nil
+}
+
+type Channel struct {
+	ID   string `json:"id"`
+	Name string `json:"displayName"`
+}
+
+func (g *GraphClient) ResolveTeamID(accessToken, displayName string) (string, error) {
+	var v struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	path := "/teams?$filter=displayName%20eq%20'" + url.QueryEscape(displayName) + "'&$select=id"
+	if err := g.doGet(accessToken, path, &v); err != nil {
+		return "", err
+	}
+	if len(v.Value) == 0 {
+		return "", fmt.Errorf("team %q not found", displayName)
+	}
+	return v.Value[0].ID, nil
+}
+
+func (g *GraphClient) ListChannels(accessToken, teamID string) ([]Channel, error) {
+	var v struct {
+		Value []Channel `json:"value"`
+	}
+	path := "/teams/" + url.PathEscape(teamID) + "/channels?$select=id,displayName"
+	if err := g.doGet(accessToken, path, &v); err != nil {
+		return nil, err
+	}
+	return v.Value, nil
+}
+
+type Refresher interface {
+	Refresh(refreshToken string) (access string, expiry time.Time, err error)
+}
+
+func EnsureAccessToken(db *sql.DB, key []byte, r Refresher, email string) (string, error) {
+	u, err := GetUser(db, email)
+	if err != nil {
+		return "", err
+	}
+	if len(u.RefreshTokenEnc) == 0 {
+		return "", fmt.Errorf("user %s never connected outlook", email)
+	}
+	refresh, err := OpenToken(key, u.RefreshTokenEnc)
+	if err != nil {
+		return "", err
+	}
+	access, _, err := r.Refresh(string(refresh))
+	if err != nil {
+		return "", err
+	}
+	return access, nil
 }

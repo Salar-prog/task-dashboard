@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGraphParsesMail(t *testing.T) {
@@ -60,5 +62,44 @@ func TestGraphParsesTeamsMentions(t *testing.T) {
 	}
 	if len(msgs[1].Mentioned) != 0 {
 		t.Fatalf("chatter must have no mentions")
+	}
+}
+
+func TestResolveFolderNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"value":[]}`))
+	}))
+	defer srv.Close()
+	g := &GraphClient{BaseURL: srv.URL, HTTP: srv.Client()}
+	if _, err := g.ResolveFolderID("tok", "Task Intake"); !errors.Is(err, ErrFolderNotFound) {
+		t.Fatalf("want ErrFolderNotFound, got %v", err)
+	}
+}
+
+type fakeRefresher struct{ access string }
+
+func (f fakeRefresher) Refresh(refresh string) (string, time.Time, error) {
+	if refresh != "refresh-xyz" {
+		return "", time.Time{}, errors.New("bad refresh")
+	}
+	return f.access, time.Now().Add(time.Hour), nil
+}
+
+func TestEnsureAccessTokenRefreshes(t *testing.T) {
+	db := openTestDB(t)
+	key := []byte("0123456789abcdef0123456789abcdef")
+	if err := UpsertUser(db, User{Email: "member1@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	sealed, _ := SealToken(key, []byte("refresh-xyz"))
+	if err := SetUserToken(db, "member1@example.com", sealed); err != nil {
+		t.Fatal(err)
+	}
+	got, err := EnsureAccessToken(db, key, fakeRefresher{access: "access-1"}, "member1@example.com")
+	if err != nil || got != "access-1" {
+		t.Fatalf("got %q %v", got, err)
+	}
+	if _, err := EnsureAccessToken(db, key, fakeRefresher{}, "ghost@example.com"); err == nil {
+		t.Fatalf("unknown user must error")
 	}
 }
