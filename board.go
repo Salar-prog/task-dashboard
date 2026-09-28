@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"html/template"
 	"net/http"
+	"strings"
 )
 
 // OwnerGroup is one board section. BoardData drives templates/board.tmpl.
@@ -48,6 +49,17 @@ func HandleBoard(db *sql.DB, tmpl *template.Template, members map[string]bool) h
 			Status:   q.Get("status"),
 			Priority: q.Get("priority"),
 			Q:        q.Get("q"),
+		}
+		if users, err := ListUsers(db); err == nil {
+			var missing []string
+			for _, u := range users {
+				if u.Role == "member" && !u.Connected && members[u.Email] {
+					missing = append(missing, u.Email)
+				}
+			}
+			if len(missing) > 0 {
+				data.UnconnectedNotice = "Outlook not connected: " + strings.Join(missing, ", ")
+			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {

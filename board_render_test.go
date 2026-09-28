@@ -95,3 +95,33 @@ func TestBoardSeniorNoForms(t *testing.T) {
 		t.Fatalf("member board must contain edit forms")
 	}
 }
+
+func TestBoardShowsUnconnectedNotice(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := CreateTask(db, Task{Title: "T", Owner: "member1@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertUser(db, User{Email: "member1@example.com", Role: "member"}); err != nil {
+		t.Fatal(err)
+	}
+	get := func() string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		boardHandler(t, db).ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	body := get()
+	if !strings.Contains(body, "Outlook not connected:") {
+		t.Fatalf("board must show unconnected notice prefix, got:\n%s", body)
+	}
+	if !strings.Contains(body, "member1@example.com") {
+		t.Fatalf("board must name unconnected members")
+	}
+	if err := SetUserConnected(db, "member1@example.com", []byte("sealed"), "folder-1"); err != nil {
+		t.Fatal(err)
+	}
+	if body := get(); strings.Contains(body, "Outlook not connected") {
+		t.Fatalf("connected member must clear notice, got:\n%s", body)
+	}
+}
