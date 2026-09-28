@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -128,5 +129,40 @@ func WithUser(key []byte, next http.Handler) http.Handler {
 		}
 		r.Header.Set("X-User", email)
 		next.ServeHTTP(w, r)
+	})
+}
+
+type TokenExchanger interface {
+	Exchange(code string) (email, refresh string, err error)
+}
+
+func HandleCallback(db *sql.DB, key []byte, members map[string]bool, ex TokenExchanger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email, refresh, err := ex.Exchange(r.URL.Query().Get("code"))
+		if err != nil || email == "" {
+			http.Error(w, "login failed", http.StatusBadRequest)
+			return
+		}
+		name := strings.SplitN(email, "@", 2)[0]
+		if err := UpsertUser(db, User{Email: email, DisplayName: name, Role: RoleFor(email, members)}); err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		sealed, err := SealToken(key, []byte(refresh))
+		if err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		if err := SetUserToken(db, email, sealed); err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		sess, err := SignSession(key, email, time.Now().Add(30*24*time.Hour))
+		if err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: sess, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }

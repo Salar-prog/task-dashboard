@@ -169,6 +169,11 @@ func SetUserConnected(db *sql.DB, email string, sealedToken []byte, folderID str
 	return err
 }
 
+func SetUserToken(db *sql.DB, email string, sealed []byte) error {
+	_, err := db.Exec(`UPDATE users SET refresh_token_enc=?, updated_at=CURRENT_TIMESTAMP WHERE email=?`, sealed, email)
+	return err
+}
+
 var recurrenceSteps = map[string]time.Duration{
 	"daily":   24 * time.Hour,
 	"weekly":  7 * 24 * time.Hour,
