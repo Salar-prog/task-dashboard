@@ -196,7 +196,8 @@ func main() {
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}))
-	mux.Handle("/login", HandleLocalLogin(db, tokenKey))
+	mux.Handle("GET /login", HandleLocalLogin(db, tokenKey))
+	mux.Handle("POST /login", HandleLocalLogin(db, tokenKey))
 	mux.Handle("POST /users/password", memberGate(db, fallback, HandlePasswordChange(db)))
 	mux.Handle("POST /connect", memberGate(db, fallback, HandleSaveSecret(db, tokenKey, getenv("WATCH_FOLDER_NAME", "Task Intake"))))
 
