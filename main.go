@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -198,66 +197,13 @@ func main() {
 	mux.Handle("POST /tasks", RequireMember(members, fallback, HandleCreateTask(db)))
 	mux.Handle("POST /tasks/{id}/progress", RequireMember(members, fallback, HandleTaskProgress(db)))
 	mux.Handle("POST /tasks/{id}", RequireMember(members, fallback, HandleUpdateTask(db)))
-	loginURL := "https://login.microsoftonline.com/" + getenv("TENANT_ID", "common") +
-		"/oauth2/v2.0/authorize?client_id=" + os.Getenv("CLIENT_ID") +
-		"&response_type=code&redirect_uri=" + url.QueryEscape(getenv("REDIRECT_URL", "")) +
-		"&scope=" + url.QueryEscape("openid profile email offline_access User.Read Mail.Read ChannelMessage.Read.All Team.ReadBasic.All")
-	mux.Handle("GET /login", HandleLogin(loginURL))
-	mux.Handle("GET /auth/callback", HandleCallback(db, tokenKey, members, oauthExchanger{config: oauthConfigFromEnv()}))
 	mux.Handle("POST /disconnect", RequireMember(members, fallback, HandleDisconnect(db, tokenKey)))
-	mux.Handle("GET /connect", RequireMember(members, fallback, HandleConnect(db, tokenKey, oauthRefresher{config: oauthConfigFromEnv()}, &GraphClient{}, getenv("WATCH_FOLDER_NAME", "Task Intake"))))
 	mux.Handle("GET /logout", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}))
 
-	refresher := oauthRefresher{config: oauthConfigFromEnv()}
-	graphBase := &GraphClient{}
-	teamID, channelID, resolved := "", "", false
-	resolveIDs := func(tok string) (string, string) {
-		if getenv("TEAM_NAMES", "") == "" {
-			return getenv("TEAM_ID", ""), getenv("CHANNEL_ID", "")
-		}
-		teamName := strings.TrimSpace(strings.Split(getenv("TEAM_NAMES", ""), ",")[0])
-		tid, err := graphBase.ResolveTeamID(tok, teamName)
-		if err != nil {
-			return getenv("TEAM_ID", ""), getenv("CHANNEL_ID", "")
-		}
-		chs, err := graphBase.ListChannels(tok, tid)
-		if err != nil {
-			return tid, getenv("CHANNEL_ID", "")
-		}
-		for _, c := range chs {
-			for _, w := range strings.Split(getenv("CHANNEL_NAMES", ""), ",") {
-				if strings.TrimSpace(w) != "" && c.Name == strings.TrimSpace(w) {
-					return tid, c.ID
-				}
-			}
-		}
-		return tid, getenv("CHANNEL_ID", "")
-	}
-	go func() {
-		interval, err := time.ParseDuration(getenv("POLL_EVERY", "7m"))
-		if err != nil {
-			interval = 7 * time.Minute
-		}
-		tick := time.NewTicker(interval)
-		defer tick.Stop()
-		for range tick.C {
-			on, tn, err := RunPollCycle(db, tokenKey, refresher,
-				func(tok string) OutlookSource { return graphOutlook{g: graphBase, token: tok} },
-				func(tok string) (TeamsSource, string, string) {
-					if !resolved {
-						if t, c := resolveIDs(tok); t != "" {
-							teamID, channelID, resolved = t, c, true
-							log.Printf("poll resolved team=%s channel=%s", teamID, channelID)
-						}
-					}
-					return graphTeams{g: graphBase, token: tok}, teamID, channelID
-				})
-			log.Printf("poll tick: outlook=%d teams=%d err=%v", on, tn, err)
-		}
-	}()
+	// (Local login routes arrive in the auth slice; the poll ticker returns with IMAP.)
 
 	addr := ":" + getenv("PORT", "8080")
 	log.Printf("listening on %s", addr)

@@ -132,16 +132,6 @@ func WithUser(key []byte, next http.Handler) http.Handler {
 	})
 }
 
-type TokenExchanger interface {
-	Exchange(code string) (email, refresh string, err error)
-}
-
-func HandleLogin(authURL string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, authURL, http.StatusFound)
-	})
-}
-
 func HandleDisconnect(db *sql.DB, key []byte) http.Handler {
 	_ = key
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,67 +142,6 @@ func HandleDisconnect(db *sql.DB, key []byte) http.Handler {
 		}
 		_ = ClearUserToken(db, email)
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-}
-
-func HandleCallback(db *sql.DB, key []byte, members map[string]bool, ex TokenExchanger) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		email, refresh, err := ex.Exchange(r.URL.Query().Get("code"))
-		if err != nil || email == "" {
-			http.Error(w, "login failed", http.StatusBadRequest)
-			return
-		}
-		name := strings.SplitN(email, "@", 2)[0]
-		if err := UpsertUser(db, User{Email: email, DisplayName: name, Role: RoleFor(email, members)}); err != nil {
-			http.Error(w, "login failed", http.StatusInternalServerError)
-			return
-		}
-		sealed, err := SealToken(key, []byte(refresh))
-		if err != nil {
-			http.Error(w, "login failed", http.StatusInternalServerError)
-			return
-		}
-		if err := SetUserToken(db, email, sealed); err != nil {
-			http.Error(w, "login failed", http.StatusInternalServerError)
-			return
-		}
-		sess, err := SignSession(key, email, time.Now().Add(30*24*time.Hour))
-		if err != nil {
-			http.Error(w, "login failed", http.StatusInternalServerError)
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: "session", Value: sess, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-}
-
-func HandleConnect(db *sql.DB, key []byte, ref Refresher, g *GraphClient, folderName string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		email := r.Header.Get("X-User")
-		if email == "" {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		access, err := EnsureAccessToken(db, key, ref, email)
-		if err != nil {
-			http.Error(w, "re-login to connect outlook", http.StatusBadRequest)
-			return
-		}
-		folderID, err := g.ResolveFolderID(access, folderName)
-		if err != nil {
-			http.Error(w, "folder "+folderName+" not found", http.StatusBadRequest)
-			return
-		}
-		u, err := GetUser(db, email)
-		if err != nil {
-			http.Error(w, "login failed", http.StatusInternalServerError)
-			return
-		}
-		if err := SetUserConnected(db, email, u.RefreshTokenEnc, folderID); err != nil {
-			http.Error(w, "connect failed", http.StatusInternalServerError)
-			return
-		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }
