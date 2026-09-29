@@ -10,10 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 var validPriorities = map[string]bool{"low": true, "medium": true, "high": true, "urgent": true}
@@ -167,7 +164,7 @@ func getenv(key, def string) string {
 }
 
 func main() {
-	db, err := sql.Open("sqlite", getenv("DB_PATH", "/data/app.db"))
+	db, err := OpenDB(getenv("DB_URL", "sqlite:"+getenv("DB_PATH", "/data/app.db")))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -175,15 +172,12 @@ func main() {
 	if err := Migrate(db); err != nil {
 		log.Fatal(err)
 	}
+	if err := SeedUsers(db, getenv("SEED_USERS", ""), getenv("SEED_PASSWORD", "")); err != nil {
+		log.Fatal(err)
+	}
 	tmpl, err := template.New("board").Funcs(BoardFuncs()).ParseFiles(filepath.Join(getenv("TEMPLATES_DIR", "templates"), "board.tmpl"))
 	if err != nil {
 		log.Fatal(err)
-	}
-	members := map[string]bool{}
-	for _, e := range strings.Split(getenv("MEMBERS", ""), ",") {
-		if e = strings.TrimSpace(e); e != "" {
-			members[e] = true
-		}
 	}
 	fallback := os.Getenv("MEMBER_TOKEN")
 	tokenKey, err := hex.DecodeString(os.Getenv("TOKEN_KEY"))
@@ -192,23 +186,56 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /", HandleBoard(db, tmpl, members))
+	mux.Handle("GET /", boardWithRoles(db, tmpl))
 	mux.Handle("GET /healthz", HandleHealth(db))
-	mux.Handle("POST /tasks", RequireMember(members, fallback, HandleCreateTask(db)))
-	mux.Handle("POST /tasks/{id}/progress", RequireMember(members, fallback, HandleTaskProgress(db)))
-	mux.Handle("POST /tasks/{id}", RequireMember(members, fallback, HandleUpdateTask(db)))
-	mux.Handle("POST /disconnect", RequireMember(members, fallback, HandleDisconnect(db, tokenKey)))
+	mux.Handle("POST /tasks", memberGate(db, fallback, HandleCreateTask(db)))
+	mux.Handle("POST /tasks/{id}/progress", memberGate(db, fallback, HandleTaskProgress(db)))
+	mux.Handle("POST /tasks/{id}", memberGate(db, fallback, HandleUpdateTask(db)))
+	mux.Handle("POST /disconnect", memberGate(db, fallback, HandleDisconnect(db, tokenKey)))
 	mux.Handle("GET /logout", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}))
+	mux.Handle("/login", HandleLocalLogin(db, tokenKey))
+	mux.Handle("POST /users/password", memberGate(db, fallback, HandlePasswordChange(db)))
+	mux.Handle("POST /connect", memberGate(db, fallback, HandleSaveSecret(db, tokenKey, getenv("WATCH_FOLDER_NAME", "Task Intake"))))
 
-	// (Local login routes arrive in the auth slice; the poll ticker returns with IMAP.)
+	// (The poll ticker returns with IMAP.)
 
 	addr := ":" + getenv("PORT", "8080")
 	log.Printf("listening on %s", addr)
 	withUser := WithUser(tokenKey, mux)
 	log.Fatal(http.ListenAndServe(addr, withUser))
+}
+
+// memberGate rebuilds the editor set from user roles on every request so
+// role changes apply without restart; it delegates to RequireMember.
+func memberGate(db *sql.DB, fallback string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		members := map[string]bool{}
+		if users, err := ListUsers(db); err == nil {
+			for _, u := range users {
+				if u.Role == "member" {
+					members[u.Email] = true
+				}
+			}
+		}
+		RequireMember(members, fallback, next).ServeHTTP(w, r)
+	})
+}
+
+func boardWithRoles(db *sql.DB, tmpl *template.Template) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		members := map[string]bool{}
+		if users, err := ListUsers(db); err == nil {
+			for _, u := range users {
+				if u.Role == "member" {
+					members[u.Email] = true
+				}
+			}
+		}
+		HandleBoard(db, tmpl, members).ServeHTTP(w, r)
+	})
 }
 
 // HandleTaskProgress moves status + % with validation (blocked needs note).

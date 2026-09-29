@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // RequireMember gates writes: GET passes for all (senior read-only view),
@@ -114,13 +116,6 @@ func VerifySession(key []byte, cookie string) (string, error) {
 	return parts[0], nil
 }
 
-func RoleFor(email string, members map[string]bool) string {
-	if members[email] {
-		return "member"
-	}
-	return "senior"
-}
-
 func WithUser(key []byte, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		email := ""
@@ -142,6 +137,99 @@ func HandleDisconnect(db *sql.DB, key []byte) http.Handler {
 		}
 		_ = ClearUserToken(db, email)
 		http.SetCookie(w, &http.Cookie{Name: "session", Value: "", Path: "/", MaxAge: -1})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}
+
+// HandleLocalLogin serves a password form (GET) and verifies credentials
+// (POST): bcrypt compare, then the same 30-day HMAC session cookie.
+// Unknown users and wrong passwords both answer 401 without distinction.
+func HandleLocalLogin(db *sql.DB, key []byte) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(`<!DOCTYPE html><html><body><h1>Login</h1><form method="post" action="/login"><input type="text" name="email" placeholder="email"><input type="password" name="password" placeholder="password"><button type="submit">Login</button></form></body></html>`))
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		u, err := GetUser(db, r.FormValue("email"))
+		if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(r.FormValue("password"))) != nil {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		sess, err := SignSession(key, u.Email, time.Now().Add(30*24*time.Hour))
+		if err != nil {
+			http.Error(w, "login failed", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: sess, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}
+
+// HandlePasswordChange verifies the old password and requires new >= 8 chars.
+func HandlePasswordChange(db *sql.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("X-User")
+		if email == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		u, err := GetUser(db, email)
+		if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(r.FormValue("old"))) != nil {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		if len(r.FormValue("new")) < 8 {
+			http.Error(w, "new password too short", http.StatusBadRequest)
+			return
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(r.FormValue("new")), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "change failed", http.StatusInternalServerError)
+			return
+		}
+		if err := SetUserPassword(db, email, string(hash)); err != nil {
+			http.Error(w, "change failed", http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+}
+
+// HandleSaveSecret stores the member's mailbox app password (sealed) and
+// marks them connected; the IMAP poller opens it per cycle.
+func HandleSaveSecret(db *sql.DB, key []byte, folderName string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email := r.Header.Get("X-User")
+		if email == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form", http.StatusBadRequest)
+			return
+		}
+		if r.FormValue("secret") == "" {
+			http.Error(w, "secret required", http.StatusBadRequest)
+			return
+		}
+		sealed, err := SealToken(key, []byte(r.FormValue("secret")))
+		if err != nil {
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		if err := SetUserConnected(db, email, sealed, folderName); err != nil {
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 }

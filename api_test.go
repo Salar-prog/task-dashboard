@@ -139,13 +139,3 @@ func TestWithUserSetsHeader(t *testing.T) {
 		t.Fatalf("invalid session must clear X-User, got %q", got)
 	}
 }
-
-func TestRoleFor(t *testing.T) {
-	m := map[string]bool{"member1@example.com": true}
-	if RoleFor("member1@example.com", m) != "member" {
-		t.Fatalf("member misclassified")
-	}
-	if RoleFor("senior@example.com", m) != "senior" {
-		t.Fatalf("senior misclassified")
-	}
-}

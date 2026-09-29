@@ -7,6 +7,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -270,6 +271,43 @@ func SetUserToken(db *sql.DB, email string, sealed []byte) error {
 func ClearUserToken(db *sql.DB, email string) error {
 	_, err := db.Exec(Q(`UPDATE users SET refresh_token_enc=NULL, secret_enc=NULL, connected=0, updated_at=CURRENT_TIMESTAMP WHERE email=?`), email)
 	return err
+}
+
+func SetUserPassword(db *sql.DB, email, hash string) error {
+	_, err := db.Exec(Q(`UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE email=?`), hash, email)
+	return err
+}
+
+// SeedUsers creates missing accounts from "email:role,..." with a default
+// password. Existing users are never touched (no password resets on restart).
+func SeedUsers(db *sql.DB, spec, password string) error {
+	if strings.TrimSpace(spec) == "" {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	for _, pair := range strings.Split(spec, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		email, role, ok := strings.Cut(pair, ":")
+		if !ok || !strings.Contains(email, "@") || (role != "member" && role != "senior") {
+			return fmt.Errorf("bad seed entry %q", pair)
+		}
+		if _, err := GetUser(db, email); err == nil {
+			continue
+		}
+		if err := UpsertUser(db, User{Email: email, DisplayName: email, Role: role}); err != nil {
+			return err
+		}
+		if err := SetUserPassword(db, email, string(hash)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var recurrenceSteps = map[string]time.Duration{
