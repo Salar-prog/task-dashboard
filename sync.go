@@ -57,5 +57,31 @@ func PollOutlookForUser(db *sql.DB, src OutlookSource, userEmail string) (int, e
 	return imported, nil
 }
 
-// (Teams/Graph polling was removed on the local-auth branch: Graph is OAuth-only.
-// RunPollCycle is reintroduced test-first in the IMAP slice.)
+// (Teams/Graph polling was removed on the local-auth branch: Graph is OAuth-only.)
+
+// RunPollCycle polls every connected member's mailbox with their own stored
+// secret. Failures are logged per user without aborting the cycle.
+func RunPollCycle(db *sql.DB, key []byte, mkOutlook func(email, secret string) OutlookSource) (int, error) {
+	users, err := ListUsers(db)
+	if err != nil {
+		return 0, err
+	}
+	imported := 0
+	for _, u := range users {
+		if u.Role != "member" || !u.Connected {
+			continue
+		}
+		secret, err := OpenUserSecret(db, key, u.Email)
+		if err != nil {
+			_ = LogImportError(db, "outlook", u.Email, err)
+			continue
+		}
+		n, err := PollOutlookForUser(db, mkOutlook(u.Email, string(secret)), u.Email)
+		if err != nil {
+			_ = LogImportError(db, "outlook", u.Email, err)
+			continue
+		}
+		imported += n
+	}
+	return imported, nil
+}

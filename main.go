@@ -200,7 +200,22 @@ func main() {
 	mux.Handle("POST /users/password", memberGate(db, fallback, HandlePasswordChange(db)))
 	mux.Handle("POST /connect", memberGate(db, fallback, HandleSaveSecret(db, tokenKey, getenv("WATCH_FOLDER_NAME", "Task Intake"))))
 
-	// (The poll ticker returns with IMAP.)
+	host := getenv("IMAP_HOST", "outlook.office365.com:993")
+	go func() {
+		interval, err := time.ParseDuration(getenv("POLL_EVERY", "7m"))
+		if err != nil {
+			interval = 7 * time.Minute
+		}
+		tick := time.NewTicker(interval)
+		defer tick.Stop()
+		for range tick.C {
+			n, err := RunPollCycle(db, tokenKey,
+				func(email, secret string) OutlookSource {
+					return imapOutlook{host: host, user: email, secret: secret}
+				})
+			log.Printf("poll tick: outlook=%d err=%v", n, err)
+		}
+	}()
 
 	addr := ":" + getenv("PORT", "8080")
 	log.Printf("listening on %s", addr)

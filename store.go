@@ -273,6 +273,19 @@ func ClearUserToken(db *sql.DB, email string) error {
 	return err
 }
 
+// OpenUserSecret decrypts a member's stored mailbox secret. Empty means
+// never connected (/connect not done) and is an error, not a blank login.
+func OpenUserSecret(db *sql.DB, key []byte, email string) ([]byte, error) {
+	u, err := GetUser(db, email)
+	if err != nil {
+		return nil, err
+	}
+	if len(u.SecretEnc) == 0 {
+		return nil, fmt.Errorf("user %s has no mail secret", email)
+	}
+	return OpenToken(key, u.SecretEnc)
+}
+
 func SetUserPassword(db *sql.DB, email, hash string) error {
 	_, err := db.Exec(Q(`UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE email=?`), hash, email)
 	return err
