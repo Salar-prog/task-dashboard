@@ -30,7 +30,7 @@ func TestUserUpsertConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after connect: %v", err)
 	}
-	if !u.Connected || u.OutlookFolderID != "folder-1" || string(u.RefreshTokenEnc) != string(sealed) {
+	if !u.Connected || u.OutlookFolderID != "folder-1" || string(u.SecretEnc) != string(sealed) {
 		t.Fatalf("connected state wrong: %+v", u)
 	}
 

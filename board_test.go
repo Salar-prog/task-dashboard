@@ -76,11 +76,15 @@ func TestRecurrenceClone(t *testing.T) {
 
 	var status string
 	var progress int
-	var deadline time.Time
+	var deadlineStr sql.NullString
 	err = db.QueryRow(`SELECT status, progress_pct, deadline FROM tasks WHERE id=?`, cloneID).
-		Scan(&status, &progress, &deadline)
+		Scan(&status, &progress, &deadlineStr)
 	if err != nil {
 		t.Fatalf("read clone: %v", err)
+	}
+	deadline, err := time.Parse(time.RFC3339, deadlineStr.String)
+	if err != nil {
+		t.Fatalf("parse clone deadline %q: %v", deadlineStr.String, err)
 	}
 	if status != "todo" || progress != 0 {
 		t.Fatalf("clone reset: want todo/0, got %s/%d", status, progress)
